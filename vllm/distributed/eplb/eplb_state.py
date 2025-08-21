@@ -42,7 +42,7 @@ from vllm.logger import init_logger
 from vllm.model_executor.models.interfaces import MixtureOfExperts
 
 from .rebalance_execute import rearrange_expert_weights_inplace
-from .policy.policy_factory import (DynamicConfig, PolicyFactory)
+from .policy.policy_factory import PolicyFactory
 from .policy.policy_abstract import EplbPolicy
 
 logger = init_logger(__name__)
@@ -262,9 +262,10 @@ class EplbState:
         expert_rearrangement_step = max(
             0, eplb_step_interval - eplb_step_interval // 4)
 
-        # Construct the algorithm instance based on the selected eplb algorithm type.
+        # Construct the algorithm instance based
+        # on the selected eplb algorithm type.
         policy_type = parallel_config.eplb_policy_type
-        policy = PolicyFactory.generate_policy(policy_type, DynamicConfig())
+        policy = PolicyFactory.generate_policy(policy_type)
 
         if global_expert_load is not None:
             ep_group = get_ep_group().device_group

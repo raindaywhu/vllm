@@ -1,8 +1,7 @@
-# Copyright Huawei Technologies Co., Ltd. 2024-2025. All rights reserved.
 from collections import defaultdict
 import numpy as np
 import torch
-from .policy_abstract import DynamicConfig, EplbPolicy
+from .policy_abstract import EplbPolicy
 
 
 class DynamicTable:
@@ -13,9 +12,6 @@ class DynamicTable:
 
 
 class DynamicEplb(EplbPolicy):
-
-    def __init__(self, config: DynamicConfig):
-        super().__init__(config)
 
     @staticmethod
     def safe_divide(a, b):
@@ -36,32 +32,9 @@ class DynamicEplb(EplbPolicy):
         return a % b
 
     @staticmethod
-    def add_redundant(current_expert_table, expert_workload, num_original_expert):
-        layer_num, npu_num, experts_per_npu = expert_workload.shape
-        workload_new = np.zeros((layer_num, num_original_expert))
-        for layer_idx in range(layer_num):
-            workload_dict = defaultdict(int)
-            placement_layer = current_expert_table[layer_idx].copy()
-            workload_layer = expert_workload[layer_idx].copy()
-            for npu_idx in range(npu_num):
-                for expert_idx in range(experts_per_npu):
-                    workload_dict[placement_layer[npu_idx][expert_idx]] += workload_layer[npu_idx][expert_idx]
-            for expert_idx in range(num_original_expert):
-                workload_new[layer_idx][expert_idx] = workload_dict[expert_idx]
-        return workload_new
-
-    @staticmethod
-    def get_redundant_num(npu_num, counts):
-        redundant_num_each_npu = np.sum(counts - 1)
-        return redundant_num_each_npu
-
-    @staticmethod
-    def calculate_max_heat_per_layer(placement_table, workload_table, layer_num):
-        max_heat_per_layer = []
-        for layer_idx in range(layer_num):
-            npu_heats_now = np.sum(workload_table[layer_idx], axis=1)
-            max_heat_per_layer.append(np.max(npu_heats_now))
-        return max_heat_per_layer
+    def get_redundant_num(counts):
+        redundant_num_each_rank = np.sum(counts - 1)
+        return redundant_num_each_rank
 
     def calculate_initial_imbalance(self, global_deployment, new_layer_workloads):
 
@@ -93,6 +66,24 @@ class DynamicEplb(EplbPolicy):
         return layer_imbalance, max_heat_per_layer
 
     def compute_redundant_assignments(self, weights, num_redundant_experts, num_experts, node_id, per_node_route_expert_num):
+        """
+        Each time, select the expert with the highest load,
+        generate a redundant expert, and then update the load.
+
+        Parameters:
+            weights: [n], The weight of each expert
+             or the weight of each expert within each node
+            num_redundant_experts: The number of redundancy experts
+            num_experts:The number of logic experts
+            node_id: The index of node
+            per_node_route_expert_num: The number of routing
+            experts at each node
+
+        Returns:
+            redundancy_counts: [n], The number of redundant experts
+            weight_dict:[n], The weight of each expert
+            or the weight of each expert within each node
+        """
 
         redundancy_counts = np.zeros(num_experts, dtype=np.int32)
         node_offset_position = node_id * per_node_route_expert_num
@@ -110,7 +101,31 @@ class DynamicEplb(EplbPolicy):
         return redundancy_counts, weight_dict
 
 
-    def repeat_compute_redundant_assignments(self, layer_workloads, rendun_pos, num_experts, num_exist_expert, device_assignments, device_counts, expert_from_device, com_between_devices):
+    def repeat_compute_redundant_assignments(self, layer_workloads, rendun_pos, num_experts,
+                                             num_exist_expert, device_assignments, device_counts,
+                                             expert_from_device, com_between_devices):
+        """
+        Each time, select the hottest expert and redundantly place
+        them on a card with available space, then update the data.
+        If it cannot be placed, choose the next hottest expert,
+        and so on, until an expert who can be placed is found.
+
+        Parameters:
+            layer_workloads: [n], the weight of each item
+            rendun_pos: Redundant positions on each device
+            num_experts: Number of Logic Experts
+            num_exist_expert: [n], Number of Exist Experts
+            device_assignments: [m, k], the assignment of each device
+            device_counts: the number of devices
+            expert_from_device:[n] The logic expert was on that device.
+            com_between_devices: Communication status between devices
+
+        Returns:
+            sorted_weights: [n], the weight of each expert
+            device_assignments: [m, k], the assignment of each device
+            device_counts: the number of devices
+            com_between_devices: Communication status between devices
+        """
 
         current_weights = np.zeros((num_experts,), dtype='object')
         for expert_id, workload_weight in enumerate(layer_workloads):
@@ -159,6 +174,20 @@ class DynamicEplb(EplbPolicy):
 
     @staticmethod
     def prepare_expert_list(updated_weights, redundancy_counts, num_redundant_experts):
+        """
+        Statistically selected redundant expert information
+
+        Parameters:
+            updated_weights: [n], The weight of each expert
+             or the weight of each expert within each node
+            num_redundant_experts: The number of redundancy experts
+            redundancy_counts: [n], The number of redundant experts
+
+        Returns:
+            A list of redundant experts,
+            ordered from highest to lowest load.
+        """
+
         redundant_expert_list = np.empty(num_redundant_experts, dtype=object)
 
         index = 0
@@ -174,6 +203,23 @@ class DynamicEplb(EplbPolicy):
 
     @staticmethod
     def non_redundant_expert_information(origin_deployment, updated_weights, rendun_pos):
+        """
+        Collect information on non-experts under new load conditions
+
+        Parameters:
+            original_deployment: [m, k] The deployment
+            status of experts on each device
+            updated_weights: [n], The weight of each expert
+             or the weight of each expert within each node
+            rendun_pos: Redundant positions on each device
+
+        Returns:
+            device_assignments: [m, k], the assignment of each device
+            device_weights: [m, k], the load of each expert on the equipment
+            device_loads: the load of each device
+            device_counts: the number of devices
+        """
+
         device_num = len(origin_deployment)
         num_experts_per_device = origin_deployment.shape[1]
 
@@ -204,6 +250,20 @@ class DynamicEplb(EplbPolicy):
 
 
     def recomputing_initial_weight(self, layer_workloads, device_assignments):
+
+        """
+        Recalculate the load based on
+        the current expert on the card.
+
+        Parameters:
+            layer_workloads: [n], the weight of each item
+            device_assignments: [m, k], the assignment of each device
+
+        Returns:
+            cur_layer_workload: [n], the weight of each item
+            num_all_experts: [n], the number of each expert
+        """
+
         num_all_experts = [0] * len(layer_workloads)
         for device in device_assignments:
             for expert_id in device:
@@ -221,6 +281,36 @@ class DynamicEplb(EplbPolicy):
 
     def distribute_redun_experts(self, layer_workloads, device_assignments, device_weights, device_loads, device_counts, redundant_expert_list,
                                 expert_from_device, num_experts, rendun_pos):
+        """
+        The position of the redundant expert before
+        placing the redundant expert on the card.
+        Place the currently hottest redundant expert
+        onto the card with the remaining available
+        slot and the least load.
+        If there are still devices with empty slots
+        that have not been filled with redundant
+        experts, reselect appropriate redundant experts.
+
+        Parameters:
+            layer_workloads: [n], the weight of each item
+            device_assignments: [m, k], the assignment of each device
+            device_weights: [m, k], the load of each expert on the equipment
+            device_loads: the load of each device
+            device_counts: the number of devices
+            redundant_expert_list:[r], A list of redundant experts,
+            ordered from highest to lowest load.
+            expert_from_device:[n] The logic expert
+            was on that device.
+            num_experts: Number of Logic Experts
+            rendun_pos: Redundant positions on each device
+
+        Returns:
+            device_assignments: [m, k], the assignment of each device
+            device_weights: [m, k], the load of each expert on the equipment
+            device_loads: the load of each device
+            device_counts: the number of devices
+            com_between_devices: Communication status between devices
+        """
 
         num_devices = len(device_assignments)
         com_between_devices = [{} for _ in range(num_devices)]
@@ -245,7 +335,9 @@ class DynamicEplb(EplbPolicy):
                 com_between_devices[candidate][communication_box_index] = expert_id
 
         if any(sublist for sublist in rendun_pos):
+
             cur_layer_workload, num_exist_expert = self.recomputing_initial_weight(layer_workloads, device_assignments)
+
 
             update_workload, device_assignments, device_counts, com_between_devices = self.repeat_compute_redundant_assignments(cur_layer_workload, rendun_pos,
                                                                                                                                               num_experts, num_exist_expert,
@@ -261,7 +353,31 @@ class DynamicEplb(EplbPolicy):
         return device_assignments, device_weights, device_loads, device_counts, com_between_devices
 
     def redundancy_again(self, layer_workloads, origin_weights, origin_deployment, expert_from_device, rendun_pos, node_id = 0, per_node_route_expert_num = 0):
+        """
+        Calculate the appropriate redundant expert
+        based on the current load and assign them
+        to the redundant expert position.
 
+        Parameters:
+            layer_workloads: [n], the weight of each item
+            origin_weights: [n], The weight of each expert
+             or the weight of each expert within each node
+            original_deployment: [m, k] The deployment
+            status of experts on each device
+            expert_from_device:[n] The logic expert
+            was on that device.
+            rendun_pos: Redundant positions on each device
+            node_id: The index of node
+            per_node_route_expert_num: The number of routing
+            experts at each node
+
+        Returns:
+            device_assignments: [m, k], the assignment of each device
+            device_weights: [m, k], the load of each expert on the equipment
+            device_loads: the load of each device
+            device_counts: the number of devices
+            com_between_devices: Communication status between devices
+        """
 
         num_experts = len(layer_workloads)
 
@@ -339,12 +455,33 @@ class DynamicEplb(EplbPolicy):
         com_between_devices[cur_device_id][next_device_id] = next_expert_id
         com_between_devices[next_device_id][cur_device_id] = cur_expert_id
 
-    def redundant_expert_deployment(self, layer_workloads, original_deployment, expert_from_device, node_num,
+    def redundant_expert_deployment(self, layer_workloads, original_deployment, expert_from_device, nodes_num,
                                     is_node_redundant, rendun_pos):
+        """
+        Choose different methods based on whether
+        it is node internal redundancy.
+
+        Parameters:
+            layer_workloads: [n], the weight of each item
+            original_deployment: [m, k] The deployment
+            status of experts on each device
+            expert_from_device:[n] The logic expert
+            was on that device.
+            nodes_num: The number of nodes
+            is_node_redundant: Intra-Node Redundancy
+            rendun_pos[m, p]: Redundant positions on each device
+
+        Returns:
+            report: Expert information on the device
+            max_load: The load of the hottest device
+            com_between_devices: Communication status
+            between devices
+        """
+
         device_num, per_device_expert_num = original_deployment.shape
         route_expert_num = layer_workloads.shape[0]
-        per_node_device_num = self.safe_exact_divide(device_num, node_num)
-        per_node_route_expert_num = self.safe_exact_divide(route_expert_num, node_num)
+        per_node_device_num = self.safe_exact_divide(device_num, nodes_num)
+        per_node_route_expert_num = self.safe_exact_divide(route_expert_num, nodes_num)
 
         if is_node_redundant:
 
@@ -354,7 +491,7 @@ class DynamicEplb(EplbPolicy):
             device_counts = []
             com_between_devices = []
 
-            for node_id in range(node_num):
+            for node_id in range(nodes_num):
 
                 cur_node_weights = np.array(layer_workloads[node_id * per_node_route_expert_num: (node_id + 1) * per_node_route_expert_num])
                 cur_original_deployment = original_deployment[node_id * per_node_device_num: (node_id + 1) * per_node_device_num]
@@ -390,7 +527,28 @@ class DynamicEplb(EplbPolicy):
 
     @staticmethod
     def two_device_exchange_experts(cur_device_result, exchange_device_result, cur_exchanged_expert_id,
-                                    next_exchanged_expert_id, ave_workload, increment, num_redundancy_expert):
+                                    next_exchanged_expert_id, ave_workload, increment):
+        """
+        Experts from both devices attempted to conduct an exchange.
+
+        Parameters:
+            cur_device_result: Information on the hottest device
+            exchange_device_result: Device information selected for exchange
+            cur_exchanged_expert_id:  Experts who have already
+            conducted exchanges on the hottest device
+            next_exchanged_expert_id: Experts who have already
+            conducted exchanges on the target device
+            ave_workload: Average load of all equipment
+            increment: Switch Expert's Load Threshold
+
+        Returns:
+            best_cur_index: Expert index for selecting
+            exchanges on the hottest devices.
+            The value cannot be swapped. The value is - 1.
+            best_next_index: Expert index for selecting
+            exchanges on the target devices
+            The value cannot be swapped. The value is - 1.
+        """
 
         cur_weights = cur_device_result['expert_weights']
         next_weights = exchange_device_result['expert_weights']
@@ -431,9 +589,37 @@ class DynamicEplb(EplbPolicy):
 
         return best_cur_index, best_next_index
 
-    def expert_exchange_between_devices(self, ave_workload, increment, cur_layer_result, com_between_devices,
-                                        num_redundancy_expert,
-                                        node_idx=0, per_node_device_num=0, is_node_redundant=False):
+    def expert_exchange_between_devices(self, ave_workload, increment, cur_layer_result,
+                                        com_between_devices, node_idx=0,
+                                        per_node_device_num=0, is_node_redundant=False):
+        """
+        Each time, identify the hottest and the coldest devices,
+        and iterate through the experts of both to attempt an exchange.
+        If an exchange cannot be made, try the next coldest device,
+        and so on, until a device that can be exchanged is found,
+        and then proceed with the exchange. If no other devices
+        can be exchanged with the hottest device, stop the exchange.
+
+        Exchange Restrictions:
+            1. Each pair of devices can only communicate once.
+            2. No relay is allowed.
+            3. The experts on the devices must not be the same.
+            4. The profit after the exchange must exceed the threshold.
+
+        Parameters:
+            ave_workload: Average load of all equipment
+            increment: Switch Expert's Load Threshold
+            cur_layer_result:  Expert information on the device
+            com_between_devices: Communication status
+            between devices
+            node_idx: The index of the node
+            per_node_device_num: The number of devices within each node
+            is_node_redundant: Intra-Node Redundancy
+
+        Returns:
+            global_deployment: Current Layer Expert Deployment
+            max_workload: The load of the hottest device
+        """
 
         if is_node_redundant:
             cur_devices_result = cur_layer_result[node_idx * per_node_device_num:(node_idx + 1) * per_node_device_num]
@@ -441,7 +627,7 @@ class DynamicEplb(EplbPolicy):
             cur_devices_result = cur_layer_result
 
         devices_total_weight = [(device['total_load'], device['device_id'] - 1) for device in cur_devices_result]
-        sorted_weights = sorted(devices_total_weight, key=lambda x: x[0])  # 初始排序
+        sorted_weights = sorted(devices_total_weight, key=lambda x: x[0])
 
         exchange_frequency = 100
         while exchange_frequency > 0:
@@ -464,7 +650,6 @@ class DynamicEplb(EplbPolicy):
                         next_exchange_ids,
                         ave_workload,
                         increment,
-                        num_redundancy_expert
                     )
 
                     if cur_idx != -1:
@@ -477,6 +662,7 @@ class DynamicEplb(EplbPolicy):
                         new_max_load = cur_layer_result[max_device_id]['total_load']
                         new_min_load = cur_layer_result[min_device_id]['total_load']
 
+                        # Update Load Sorting
                         del sorted_weights[-1]
                         del sorted_weights[i]
 
@@ -504,19 +690,37 @@ class DynamicEplb(EplbPolicy):
             if not exchange_occurred:
                 break
 
-    def exchange_experts(self, layer_result, layer_com_between_devices, num_nodes, device_num, is_node_redundant,
-                         ave_workload, increment, num_redundancy_expert, org_deployment):
+    def exchange_experts(self, layer_result, layer_com_between_devices, num_nodes, num_devices, is_node_redundant,
+                         ave_workload, increment):
+        """
+        Select the corresponding switching expert
+        method based on whether there is redundancy within the node.
+
+        Parameters:
+            layer_result:  Expert information on the device
+            layer_com_between_devices: Communication status
+            between devices
+            num_nodes: The number of nodes
+            num_devices: The number of devices
+            is_node_redundant: Intra-Node Redundancy
+            ave_workload: Average load of all equipment
+            increment: Switch Expert's Load Threshold
+
+        Returns:
+            global_deployment: Current Layer Expert Deployment
+            max_workload: The load of the hottest device
+        """
 
         global_deployment = []
 
         if is_node_redundant:
-            per_node_device_num = self.safe_exact_divide(device_num, num_nodes)
+            per_node_device_num = self.safe_exact_divide(num_devices, num_nodes)
             for node_idx in range(num_nodes):
                 self.expert_exchange_between_devices(ave_workload, increment, layer_result,
-                                                     layer_com_between_devices, num_redundancy_expert,
-                                                     node_idx, per_node_device_num, is_node_redundant)
+                                                     layer_com_between_devices, node_idx,
+                                                     per_node_device_num, is_node_redundant)
         else:
-            self.expert_exchange_between_devices(ave_workload, increment, layer_result, layer_com_between_devices, num_redundancy_expert)
+            self.expert_exchange_between_devices(ave_workload, increment, layer_result, layer_com_between_devices)
 
         max_workload = 0
         for box in layer_result:
@@ -527,7 +731,6 @@ class DynamicEplb(EplbPolicy):
         global_deployment = np.array(global_deployment)
 
         return global_deployment, max_workload
-
 
     def count_elements(self, lst):
         count = 0
@@ -569,7 +772,7 @@ class DynamicEplb(EplbPolicy):
 
                 global_deployment[layer_id][card_id] = new_result
 
-        return global_deployment
+        return np.array(global_deployment)
 
     def gen_result(self, global_deployment, layer_num, local_expert_num):
 
@@ -579,7 +782,7 @@ class DynamicEplb(EplbPolicy):
                 for expert_id in device:
                     logical_replica_count[layer_id][expert_id] += 1
 
-        max_expert_num = max(logical_replica_count)
+        max_expert_num = logical_replica_count.max()
         logical_to_physical_map = torch.full((layer_num, local_expert_num, max_expert_num), -1, dtype=torch.int32)
 
         new_global_deployment = global_deployment.reshape(layer_num, -1)
@@ -593,18 +796,20 @@ class DynamicEplb(EplbPolicy):
 
         return physical_to_logical_map, logical_to_physical_map, logical_replica_count
 
-    def rebalance_experts(self, current_expert_table, expert_workload, num_replicas, num_groups, num_nodes, num_ranks, is_node_redundant = False, increment = 0.01):
+    def rebalance_experts(self, old_global_expert_indices, weight, num_replicas,
+                          num_groups, num_nodes, num_ranks, is_node_redundant = False,
+                          increment = 0.01, imbalance_threshold = 1.01, hottest_load_threshold = 0.95):
 
+        # Processing and analyzing data
         info = DynamicTable()
-        info.workload_table = expert_workload.numpy()
+        info.workload_table = weight.numpy()
         layer_num = info.workload_table.shape[0]
-        info.placement_table = current_expert_table.numpy().reshape(layer_num, num_ranks, -1)
+        info.placement_table = old_global_expert_indices.numpy().reshape(layer_num, num_ranks, -1)
         expert_ids, counts = np.unique(info.placement_table[0], return_counts=True)
-        num_redundancy_expert = self.get_redundant_num(num_ranks, counts)
+        num_redundancy_expert = self.get_redundant_num(counts)
         num_original_expert = len(expert_ids)
         layer_workloads = info.workload_table
 
-        num_node = self.safe_exact_divide(num_ranks, 8)
         layer_num = layer_workloads.shape[0]
         expert_num = layer_workloads.shape[1]
         expert_from_device = np.zeros((layer_num, num_original_expert))
@@ -613,26 +818,29 @@ class DynamicEplb(EplbPolicy):
             raise ValueError(f"The number of original experts ({num_original_expert}) must match expert_num ({expert_num})")
 
         if num_ranks <= 0:
-            raise ValueError("The number of NPUs must be greater than 0")
+            raise ValueError("The number of ranks must be greater than 0")
 
         if num_ranks < num_redundancy_expert:
-            raise ValueError(f"The number of NPUs ({num_ranks}) must be greater than or equal to the number of redundant experts ({num_redundancy_expert})")
+            raise ValueError(f"The number of ranks ({num_ranks}) must be greater than or equal to the number of redundant experts ({num_redundancy_expert})")
 
         global_deployment = [[[] for _ in range(num_ranks)] for _ in range(layer_num)]
         layer_initial_imbalance, max_heat_per_layer_before = self.calculate_initial_imbalance(info.placement_table, layer_workloads)
-        npu_heat_all_origin = sum(max_heat_per_layer_before)
+        rank_heat_all_origin = sum(max_heat_per_layer_before)
 
         max_heat_per_layer_after = np.zeros([layer_num])
         sum_num = 0
 
+        # Calculate the new deployment for each layer
         for layer in range(layer_num):
-            #print(f"Load imbalance ratio of layer {layer} under the new workload", layer_initial_imbalance[layer])
-            if layer_initial_imbalance[layer] < 1.01:
+            if layer_initial_imbalance[layer] < imbalance_threshold:
                 global_deployment[layer] = info.placement_table[layer]
                 continue
 
             ave_workload = self.safe_divide(np.sum(layer_workloads[layer]), num_ranks)
 
+            # The position of the statistical logic expert
+            # on the card and the location of the redundancy
+            # expert on the card.
             rendun_pos = [[] for _ in range(num_ranks)]
             existing_experts = set()
             for device_id, device in enumerate(info.placement_table[layer]):
@@ -646,15 +854,12 @@ class DynamicEplb(EplbPolicy):
             result, max_workload, com_between_devices = self.redundant_expert_deployment(layer_workloads[layer],
                                                                                          info.placement_table[layer],
                                                                                          expert_from_device[layer],
-                                                                                         num_node, is_node_redundant, rendun_pos)
-
-            #print(layer, f"Imbalance Ratio after Redundancy Adjustment:", self.safe_divide(max_workload, ave_workload))
+                                                                                         num_nodes, is_node_redundant, rendun_pos)
 
             global_deployment[layer], new_max_workload = self.exchange_experts(result, com_between_devices,
-                                                                               num_node, num_ranks, is_node_redundant, ave_workload,
-                                                                               increment, num_redundancy_expert, info.placement_table[layer])
+                                                                               num_nodes, num_ranks, is_node_redundant, ave_workload,
+                                                                               increment)
 
-            #print(layer, f"Imbalance Ratio after Swap Adjustment:", self.safe_divide(new_max_workload, ave_workload))
 
             for device_id in range(num_ranks):
                 com_between_devices[device_id] = {key: value for key, value in
@@ -663,23 +868,23 @@ class DynamicEplb(EplbPolicy):
 
             max_heat_per_layer_after[layer] = max(result, key=lambda x: x['total_load'])['total_load']
 
-            # for box in result:
-            #     print("before: ",
-            #           f"Box {box['device_id']}: Items = {box['assigned_experts']}, weight = {box['expert_weights']}, Total Weight = {box['total_load']}, Item Count = {box['expert_count']}")
-
         layer_changed_ratio = []
         for layer_idx in range(layer_num):
             layer_changed_ratio.append(self.safe_divide(max_heat_per_layer_after[layer_idx], max_heat_per_layer_before[layer_idx]))
 
         per_layer_priority = np.argsort(layer_changed_ratio)
-        npu_heat_all_after = sum(max_heat_per_layer_after)
+        rank_heat_all_after = sum(max_heat_per_layer_after)
 
         change = 0
-        if npu_heat_all_after < 0.95 * npu_heat_all_origin:
+        if rank_heat_all_after < hottest_load_threshold * rank_heat_all_origin:
             change = 1
 
+        # New deployment and old deployment aligned at
+        # the same expert position on the same device.
         new_global_deployment = self.constraint_expert_local_exchange(info.placement_table, global_deployment)
 
+        # Construct the output based on the
+        # newly generated deployment.
         physical_to_logical_map, logical_to_physical_map, logical_replica_count = self.gen_result(new_global_deployment,
                                                                                                   layer_num, expert_num)
 
