@@ -1,7 +1,7 @@
 import pytest
 import torch
 
-from vllm.distributed.eplb.policy.policy_swift_balancer import DynamicEplb
+from vllm.distributed.eplb.policy.policy_swift_balancer import SwiftBalancer
 
 def test_rebalance():
     """Test rebalancing functionality"""
@@ -34,7 +34,7 @@ def test_rebalance():
     num_nodes = 1
     num_rank = 4
 
-    policy = DynamicEplb()
+    policy = SwiftBalancer()
 
     phy2log, log2phy, logcnt = policy.rebalance_experts(old_global_expert_indices, weight, num_replicas, num_groups, num_nodes, num_rank)
 
@@ -84,3 +84,4 @@ def test_rebalance():
                                      2, 1, 1, 1,
                                      1, 1, 1, 1]])
     assert torch.all(logcnt == expected_logcnt)
+
