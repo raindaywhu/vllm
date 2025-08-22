@@ -1,5 +1,5 @@
 from .policy_abstract import EplbPolicy
-from .policy_swift_balancer import DynamicEplb
+from .policy_swift_balancer import SwiftBalancer
 from .policy_default_eplb import DefaultEplb
 
 
@@ -19,9 +19,10 @@ class PolicyFactory:
             0:
             DefaultEplb,
             1:
-            DynamicEplb,
+            SwiftBalancer,
         }
 
         return policy.get(policy_type, DefaultEplb)()
+
 
 
