@@ -11,7 +11,7 @@ class DynamicTable:
     placement_table = None
 
 
-class DynamicEplb(EplbPolicy):
+class SwiftBalancer(EplbPolicy):
 
     @staticmethod
     def safe_divide(a, b):
@@ -889,4 +889,5 @@ class DynamicEplb(EplbPolicy):
                                                                                                   layer_num, expert_num)
 
         return physical_to_logical_map, logical_to_physical_map, logical_replica_count
+
 
