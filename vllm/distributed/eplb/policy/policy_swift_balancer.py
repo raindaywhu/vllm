@@ -190,11 +190,11 @@ class SwiftBalancer(EplbPolicy):
         redundant_expert_list = np.empty(num_redundant_experts, dtype=object)
         index = 0
         num_experts = len(redundancy_counts)
+
         for expert_id in range(num_experts):
             for _ in range(redundancy_counts[expert_id]):
                 redundant_expert_list[index] = (expert_id, updated_weights[expert_id])
                 index += 1
-
         sorted_indices = np.argsort([w for _, w in redundant_expert_list], kind='stable')[::-1]
         return [redundant_expert_list[i] for i in sorted_indices]
 
@@ -362,8 +362,8 @@ class SwiftBalancer(EplbPolicy):
              or the weight of each expert within each node
             original_deployment: [m, k] The deployment
             status of experts on each device
-            expert_from_device:[n] The logic
-            expert was on that device.
+            expert_from_device:[n] The logic 
+            expert was on that device
             rendun_pos: Redundant positions on each device
             node_id: The index of node
             per_node_route_expert_num: The number of
@@ -378,7 +378,6 @@ class SwiftBalancer(EplbPolicy):
         """
 
         num_experts = len(layer_workloads)
-
         num_redundant_experts = 0
         for rank_empty_pos in rendun_pos:
             num_redundant_experts += len(rank_empty_pos)
@@ -428,8 +427,9 @@ class SwiftBalancer(EplbPolicy):
         return report, max_load
 
     @staticmethod
-    def exchange_expert(cur_exchange_index, next_exchange_index, cur_device_id, next_device_id, cur_layer_result,
-                        com_between_devices):
+    def exchange_expert(cur_exchange_index, next_exchange_index, 
+                        cur_device_id, next_device_id, 
+                        cur_layer_result, com_between_devices):
 
         cur_device_deployment = cur_layer_result[cur_device_id]['assigned_experts']
         next_device_deployment = cur_layer_result[next_device_id]['assigned_experts']
@@ -863,7 +863,6 @@ class SwiftBalancer(EplbPolicy):
                 com_between_devices[device_id] = {key: value for key, value in
                                                   com_between_devices[device_id].items()}
                 sum_num += self.count_elements(com_between_devices[device_id])
-
             max_heat_per_layer_after[layer] = max(result, key=lambda x: x['total_load'])['total_load']
 
         layer_changed_ratio = []
@@ -887,6 +886,7 @@ class SwiftBalancer(EplbPolicy):
                                                                                                   layer_num, expert_num)
 
         return physical_to_logical_map, logical_to_physical_map, logical_replica_count
+
 
 
 
