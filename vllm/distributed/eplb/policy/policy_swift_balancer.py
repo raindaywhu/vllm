@@ -187,9 +187,7 @@ class SwiftBalancer(EplbPolicy):
             A list of redundant experts,
             ordered from highest to lowest load.
         """
-
         redundant_expert_list = np.empty(num_redundant_experts, dtype=object)
-
         index = 0
         num_experts = len(redundancy_counts)
         for expert_id in range(num_experts):
@@ -364,12 +362,12 @@ class SwiftBalancer(EplbPolicy):
              or the weight of each expert within each node
             original_deployment: [m, k] The deployment
             status of experts on each device
-            expert_from_device:[n] The logic expert
-            was on that device.
+            expert_from_device:[n] The logic
+            expert was on that device.
             rendun_pos: Redundant positions on each device
             node_id: The index of node
-            per_node_route_expert_num: The number of routing
-            experts at each node
+            per_node_route_expert_num: The number of
+            routing experts at each node
 
         Returns:
             device_assignments: [m, k], the assignment of each device
@@ -889,5 +887,6 @@ class SwiftBalancer(EplbPolicy):
                                                                                                   layer_num, expert_num)
 
         return physical_to_logical_map, logical_to_physical_map, logical_replica_count
+
 
 
