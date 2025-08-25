@@ -266,7 +266,7 @@ class EplbState:
         # on the selected eplb algorithm type.
         policy_type = parallel_config.eplb_policy_type
         policy = PolicyFactory.generate_policy(policy_type)
-
+        assert policy is not None, "EplbPolicy must be initialized"
         if global_expert_load is not None:
             ep_group = get_ep_group().device_group
             assert global_expert_load.shape == (model.num_moe_layers,
@@ -510,6 +510,7 @@ class EplbState:
                 "not using hierarchical rearrangement algorithm.\n"
                 f"{num_gpus=}, {num_nodes=}")
 
+        assert self.policy is not None, "EplbPolicy must be initialized"
         # Get new expert mappings
         (
             new_physical_to_logical_map,

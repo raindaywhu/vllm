@@ -36,7 +36,9 @@ def test_rebalance():
 
     policy = SwiftBalancer()
 
-    phy2log, log2phy, logcnt = policy.rebalance_experts(old_global_expert_indices, weight, num_replicas, num_groups, num_nodes, num_rank)
+    phy2log, log2phy, logcnt = policy.rebalance_experts(
+        old_global_expert_indices, weight,
+        num_replicas, num_groups, num_nodes, num_rank)
 
     # Verify output shapes
     assert phy2log.shape == (
