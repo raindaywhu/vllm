@@ -37,8 +37,8 @@ def test_rebalance():
     policy = SwiftBalancer()
 
     phy2log, log2phy, logcnt = policy.rebalance_experts(
-        old_global_expert_indices, weight,
-        num_replicas, num_groups, num_nodes, num_rank)
+        weight, num_replicas, num_groups, num_nodes,
+        num_rank, old_global_expert_indices)
 
     # Verify output shapes
     assert phy2log.shape == (
@@ -86,4 +86,3 @@ def test_rebalance():
                                      2, 1, 1, 1,
                                      1, 1, 1, 1]])
     assert torch.all(logcnt == expected_logcnt)
-

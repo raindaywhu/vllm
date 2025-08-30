@@ -13,14 +13,8 @@ on how the EPLB algorithm works.
 """
 
 import torch
+from typing import Optional
 from .policy_abstract import EplbPolicy
-
-
-class DynamicTable:
-
-    workload_table = None
-
-    placement_table = None
 
 
 class DefaultEplb(EplbPolicy):
@@ -190,12 +184,12 @@ class DefaultEplb(EplbPolicy):
 
     def rebalance_experts(
         self,
-        old_global_expert_indices: torch.Tensor,
         weight: torch.Tensor,
         num_replicas: int,
         num_groups: int,
         num_nodes: int,
         num_ranks: int,
+        old_global_expert_indices: Optional[torch.Tensor] = None
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Entry point for expert-parallelism load balancer.

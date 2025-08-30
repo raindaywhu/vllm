@@ -291,12 +291,12 @@ class EplbState:
                 new_logical_to_physical_map,
                 new_logical_replica_count,
             ) = (policy.rebalance_experts(
-                old_global_expert_indices,
                 global_expert_load,
                 num_replicas,
                 num_groups,
                 num_nodes,
                 num_gpus,
+                old_global_expert_indices
             ))
 
             max_physical_slots = new_logical_to_physical_map.shape[-1]
@@ -517,12 +517,12 @@ class EplbState:
             new_logical_to_physical_map,
             new_logical_replica_count,
         ) = (self.policy.rebalance_experts(
-            self.physical_to_logical_map,
             global_expert_load_window,
             num_replicas,
             num_groups,
             num_nodes,
             num_gpus,
+            self.physical_to_logical_map
         ))
 
         # Update expert weights
