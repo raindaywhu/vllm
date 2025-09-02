@@ -56,6 +56,10 @@ class EPLBConfig:
     This is turned off by default since it will cause communication overhead.
     """
 
+    eplb_policy_type: int = 0
+    """
+    Choose the EPLB algorithm.
+    """
 
 @config
 @dataclass
@@ -119,10 +123,6 @@ class ParallelConfig:
     """`eplb_log_balancedness` is deprecated and has been replaced with
     `eplb_config.log_balancedness`. This will be removed in v0.12.0.
     Please use `eplb_config.log_balancedness` instead."""
-    eplb_policy_type: int = 0
-    """
-    Choose the EPLB algorithm.
-    """
 
     max_parallel_loading_workers: Optional[int] = None
     """Maximum number of parallel loading workers when loading model
