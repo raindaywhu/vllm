@@ -446,7 +446,8 @@ class EplbState:
                   is_profile: bool = False,
                   execute_shuffle: bool = True,
                   global_expert_load: Optional[torch.Tensor] = None,
-                  rank_mapping: Optional[dict[int, int]] = None) -> None:
+                  rank_mapping: Optional[dict[int, int]] = None,
+                  policy_type: int = 0) -> None:
         """
         Rearrange the experts according to the current load.
         """
@@ -539,6 +540,12 @@ class EplbState:
             "device": self.physical_to_logical_map.device
         }
 
+        expert_mapper_args = (
+            model.num_moe_layers,
+            policy_type,
+            self.physical_to_logical_map.cpu(),
+        )
+
         # Submit task to asynchronous process
         if self._async_processor is None:
             logger.error(
@@ -559,7 +566,7 @@ class EplbState:
 
         try:
             success = self._async_processor.submit_task(
-                args=input_args, post_process_args=post_process_args)
+                args=input_args, post_process_args=post_process_args, expert_mapper_args=expert_mapper_args)
         except Exception as e:
             logger.error("Error submitting task to async process: %s", str(e))
             success = False

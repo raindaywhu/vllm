@@ -6,6 +6,7 @@ from multiprocessing import Queue
 from typing import Any, Callable, Optional
 
 from vllm.logger import init_logger
+from .eplb_expert_mapper import BipartiteExpertUpdate, GreedyExpertUpdate
 
 logger = init_logger(__name__)
 
@@ -80,13 +81,24 @@ class EPLBProcess:
             while True:
                 # Get arguments from input queue
                 try:
-                    args = input_queue.get(timeout=1.0)
-                    if args is None:  # Sentinel value to stop the process
+                    args, expert_mapper_args = input_queue.get(timeout=1.0)
+                    if args is None or expert_mapper_args is None:  # Sentinel value to stop the process
                         break
 
                     # Execute target function
                     result = self.target_func(*args)
                     output_queue.put(result)
+
+                    new_physical_to_logical_map = result[0]
+                    policy_type = expert_mapper_args[1]
+                    # Generate migration information
+                    new_deployment = new_physical_to_logical_map.reshape(expert_mapper_args[0], args[4], -1)
+                    old_deployment = expert_mapper_args[2].reshape(expert_mapper_args[0], args[4], -1)
+                    if policy_type == 1:
+                        update_info = BipartiteExpertUpdate(new_deployment, old_deployment).generate()
+                    elif policy_type == 0:
+                        update_info = GreedyExpertUpdate(new_deployment, old_deployment).generate()
+
                 except mp.queues.Empty:
                     # Timeout, check if we should continue
                     continue
@@ -105,7 +117,7 @@ class EPLBProcess:
             logger.debug("EPLB worker process exiting")
 
     def submit_task(self, args: tuple, post_process_args: dict[str,
-                                                               Any]) -> bool:
+                                                               Any], expert_mapper_args: tuple) -> bool:
         logger.error("EPLBProcess submit_task") #TODO del
         """
         Submit a task to the asynchronous process
@@ -132,7 +144,8 @@ class EPLBProcess:
 
         try:
             # Put arguments to the input queue
-            self._input_queue.put(args)
+            combined_args = (args, expert_mapper_args)
+            self._input_queue.put(combined_args)
             self._args = args
             self._post_process_args = post_process_args
             self._has_pending_task = True
