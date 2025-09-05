@@ -3,7 +3,10 @@
 
 from .abstract_policy import EplbPolicy
 from .default_eplb_policy import DefaultEplb
+
+from .flashlb_policy import FlashLB
 from .swift_balancer_policy import SwiftBalancer
+
 
 
 class PolicyFactory:
@@ -23,6 +26,8 @@ class PolicyFactory:
             DefaultEplb,
             1:
             SwiftBalancer,
+            2:
+            FlashLB,
         }
 
         return policy.get(policy_type, DefaultEplb)()
