@@ -14,11 +14,12 @@ logger = init_logger(__name__)
 @njit
 def compute_piece_counts(X, P, stage_weights): 
     ''' 
-    Greedy iterative expert partitioning strategy to calculate the optimal number of replicas (pieces) for each expert. 
+    Greedy iterative expert partitioning strategy to calculate the optimal number of 
+    replicas (pieces) for each expert. 
 
     Parameters: 
         X (np.ndarray): Multi-stage expert hotness matrix with shape (n_stage, num_expert),  
-        P (int): Total number of expert replicas (number of replicas) 
+        P (int): Total number of replicas
         stage_weights (np.ndarray): Multi-stage hotness weight array with shape (n_stage,).  
     Returns: 
         pieces (np.ndarray): Optimal expert partitioning scheme with shape (num_expert,).  
@@ -49,7 +50,8 @@ def compute_piece_counts(X, P, stage_weights):
             secv = unit[i, idx2] 
             alt = X[i, idx1] / (pieces[idx1] + 1) 
             delta = origin - (alt if alt > secv else secv) 
-            deltas[idx1] += delta * stage_weights[i] if np.any(delta)!=0 else stage_weights[i] 
+            deltas[idx1] += (delta * stage_weights[i] 
+                             if np.any(delta)!=0 else stage_weights[i]) 
 
         max_idx = np.argmax(deltas) 
         pieces[max_idx] += 1 
@@ -62,13 +64,13 @@ def compute_piece_counts(X, P, stage_weights):
 @njit 
 def lpt_placement(X, pieces, M, stage_weights): 
     ''' 
-    A LPT (Longest Process Time First)-based expert deployment strategy function, designed to map expert replicas  
-    to target devices optimally. 
+    A LPT (Longest Process Time First)-based expert deployment strategy function, 
+    designed to map expert replicas to target devices optimally. 
 
     Parameters: 
         X (np.ndarray): Multi-stage expert hotness matrix with shape (n_stage, num_expert),  
         pieces (np.ndarray): Optimal expert partitioning scheme with shape (num_expert,).  
-        M (int): Total number of devices (number of devices) 
+        M (int): Number of devices 
         stage_weights (np.ndarray): Multi-stage hotness weight array with shape (n_stage,).  
     Returns: 
         deployment (np.ndarray): Optimal expert deployment matrix with shape (M, num_group) 
@@ -177,14 +179,17 @@ def slice_values(X, pieces):
 @njit 
 def group_based_adaptive_searching_kernel(X, P, M, simulated_pieces, simulated_deployment, stage_weights): 
     """ 
-    Group-based adaptive searching kernel function for calculating the optimal expert partitioning strategy. 
+    Group-based adaptive searching kernel function for calculating the optimal 
+    expert partitioning strategy. 
+
     Parameters: 
         X (np.ndarray): Multi-stage expert hotness matrix with shape (n_stage, num_expert),  
-        P (int): Total number of expert replicas (number of replicas) 
-        M (int): Total number of devices (number of devices) 
-        simulated_pieces (np.ndarray): Historically predicted optimal expert partitioning scheme with shape (num_expert,).  
+        P (int): Number of expert replicas
+        M (int): Number of devices  
+        simulated_pieces (np.ndarray): Historically predicted optimal expert 
+                partitioning scheme with shape (num_expert,).  
         simulated_deployment (np.ndarray): Historically predicted optimal expert deployment scheme,  
-                                           typically with shape (M, num_group) (where num_group = P//M).  
+                typically with shape (M, num_group) (where num_group = P//M).  
         stage_weights (np.ndarray): Multi-stage hotness weight array with shape (n_stage,).  
     Returns: 
         pieces (np.ndarray): Optimal expert partitioning scheme with shape (num_expert,).  
@@ -553,7 +558,8 @@ class FlashLB(EplbPolicy):
         if old_global_expert_indices == None: 
             physical_to_logical_map = np.array(new_deployment,dtype=int).reshape((num_layer,num_replicas)) 
             maxlogcnt = int(expert_count.max()) 
-            logical_to_physical_map = compute_logical_to_physical_map(physical_to_logical_map,num_layer,num_expert,num_replicas,maxlogcnt) 
+            logical_to_physical_map = \
+                compute_logical_to_physical_map(physical_to_logical_map,num_layer,num_expert,num_replicas,maxlogcnt) 
             physical_to_logical_map = torch.tensor(physical_to_logical_map,dtype=int,device=weight.device) 
             logical_to_physical_map = torch.tensor(logical_to_physical_map,dtype=int,device=weight.device) 
             expert_count = torch.tensor(expert_count,dtype=int,device=weight.device) 
@@ -567,7 +573,8 @@ class FlashLB(EplbPolicy):
                 self.par_history[idx] = new_par[idx] 
         physical_to_logical_map = deployment.reshape((num_layer,num_replicas)) 
         maxlogcnt = int(expert_count.max()) 
-        logical_to_physical_map = compute_logical_to_physical_map(physical_to_logical_map,num_layer,num_expert,num_replicas,maxlogcnt) 
+        logical_to_physical_map = \
+            compute_logical_to_physical_map(physical_to_logical_map,num_layer,num_expert,num_replicas,maxlogcnt) 
         physical_to_logical_map = torch.tensor(physical_to_logical_map,dtype=int,device=weight.device) 
         logical_to_physical_map = torch.tensor(logical_to_physical_map,dtype=int,device=weight.device) 
         expert_count = torch.tensor(expert_count,dtype=int,device=weight.device) 
