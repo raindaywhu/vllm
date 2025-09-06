@@ -189,6 +189,16 @@ steps:
   commands:
   - pytest -v -s distributed/test_eplb_execute.py
 
+- label: EPLB Asynchronous Process Test
+  working_dir: "/vllm-workspace/tests"
+  source_file_dependencies:
+  - vllm/distributed/eplb
+  - tests/distributed/test_eplb_async_thread.py
+  - tests/distributed/test_eplb_async_thread_integration.py
+  commands:
+  - pytest -v -s distributed/test_eplb_async_thread.py
+  - pytest -v -s distributed/test_eplb_async_thread_integration.py
+
 - label: Metrics, Tracing Test # 10min
   mirror_hardwares: [amdexperimental]
   num_gpus: 2
