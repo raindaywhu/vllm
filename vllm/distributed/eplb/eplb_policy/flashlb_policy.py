@@ -5,6 +5,7 @@ import numpy as np
 from vllm.logger import init_logger
 from numba import njit 
 from collections import defaultdict, deque, Counter 
+from typing import Dict, List
 from .abstract_policy import EplbPolicy 
 
 numba_logger = logging.getLogger("numba") 
@@ -397,8 +398,8 @@ def compute_logical_to_physical_map(phy2log, num_layers, num_expert, num_replica
 
 class FlashLB(EplbPolicy): 
 
-    par_history = defaultdict(float) 
-    hotness_window = {} 
+    par_history: Dict[int, float] = {} 
+    hotness_window: Dict[int, deque[float]] = {} 
 
     def __init__(self): 
         self.max_stage_window = 32
