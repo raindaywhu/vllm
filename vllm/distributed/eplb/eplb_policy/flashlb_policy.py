@@ -13,17 +13,20 @@ logger = init_logger(__name__)
 
 @njit
 def compute_piece_counts(X, P, stage_weights): 
-    ''' 
-    Greedy iterative expert partitioning strategy to calculate the optimal number of 
-    replicas (pieces) for each expert. 
+    '''
+    Greedy iterative expert partitioning strategy to calculate the optimal
+    number of replicas (pieces) for each expert.
 
-    Parameters: 
-        X (np.ndarray): Multi-stage expert hotness matrix with shape (n_stage, num_expert),  
+    Parameters:
+        X (np.ndarray): Multi-stage expert hotness matrix with shape
+            (n_stage, num_expert),
         P (int): Total number of replicas
-        stage_weights (np.ndarray): Multi-stage hotness weight array with shape (n_stage,).  
-    Returns: 
-        pieces (np.ndarray): Optimal expert partitioning scheme with shape (num_expert,).  
-    ''' 
+        stage_weights (np.ndarray): Multi-stage hotness weight array with
+            shape (n_stage,).
+    Returns:
+        pieces (np.ndarray): Optimal expert partitioning scheme with shape
+            (num_expert,).
+    '''
     n_stage, N = X.shape 
     S = P - N 
     pieces = np.ones(N, dtype=np.int32) 
@@ -63,18 +66,22 @@ def compute_piece_counts(X, P, stage_weights):
 
 @njit 
 def lpt_placement(X, pieces, M, stage_weights): 
-    ''' 
-    A LPT (Longest Process Time First)-based expert deployment strategy function, 
-    designed to map expert replicas to target devices optimally. 
+    '''
+    A LPT (Longest Process Time First)-based expert deployment strategy
+    function, designed to map expert replicas to target devices optimally.
 
-    Parameters: 
-        X (np.ndarray): Multi-stage expert hotness matrix with shape (n_stage, num_expert),  
-        pieces (np.ndarray): Optimal expert partitioning scheme with shape (num_expert,).  
-        M (int): Number of devices 
-        stage_weights (np.ndarray): Multi-stage hotness weight array with shape (n_stage,).  
-    Returns: 
-        deployment (np.ndarray): Optimal expert deployment matrix with shape (M, num_group) 
-    ''' 
+    Parameters:
+        X (np.ndarray): Multi-stage expert hotness matrix with shape
+            (n_stage, num_expert),
+        pieces (np.ndarray): Optimal expert partitioning scheme with shape
+            (num_expert,).
+        M (int): Number of devices
+        stage_weights (np.ndarray): Multi-stage hotness weight array with
+            shape (n_stage,).
+    Returns:
+        deployment (np.ndarray): Optimal expert deployment matrix with shape
+            (M, num_group)
+    '''
 
     n_stage, N = X.shape 
     total_piece = pieces.sum() 
@@ -183,16 +190,20 @@ def group_based_adaptive_searching_kernel(X, P, M, simulated_pieces, simulated_d
     expert partitioning strategy. 
 
     Parameters: 
-        X (np.ndarray): Multi-stage expert hotness matrix with shape (n_stage, num_expert),  
+        X (np.ndarray): Multi-stage expert hotness matrix with shape
+            (n_stage, num_expert),  
         P (int): Number of expert replicas
         M (int): Number of devices  
         simulated_pieces (np.ndarray): Historically predicted optimal expert 
-                partitioning scheme with shape (num_expert,).  
-        simulated_deployment (np.ndarray): Historically predicted optimal expert deployment scheme,  
-                typically with shape (M, num_group) (where num_group = P//M).  
-        stage_weights (np.ndarray): Multi-stage hotness weight array with shape (n_stage,).  
+            partitioning scheme with shape (num_expert,).  
+        simulated_deployment (np.ndarray): Historically predicted optimal
+            expert deployment scheme, typically with shape (M, num_group)
+            (where num_group = P//M).  
+        stage_weights (np.ndarray): Multi-stage hotness weight array with
+            shape (n_stage,).  
     Returns: 
-        pieces (np.ndarray): Optimal expert partitioning scheme with shape (num_expert,).  
+        pieces (np.ndarray): Optimal expert partitioning scheme with shape
+            (num_expert,).  
     """ 
 
     n_stage, N = X.shape 
@@ -246,7 +257,6 @@ def group_based_adaptive_searching_kernel(X, P, M, simulated_pieces, simulated_d
     current_idx = 0 
     for g in range(num_group): 
         window = X_sorted[:, current_idx: current_idx + 2 * M] 
-        slices_g = slices_used_per_group[g] 
         low = max(0, current_idx + M - N) 
         high = min(num_remain_slice, M - 1) 
         while high - low > 1: 
@@ -284,13 +294,16 @@ def group_based_adaptive_searching_kernel(X, P, M, simulated_pieces, simulated_d
 @njit 
 def auto_fix_new_placement(old_placement, new_placement): 
     """ 
-    Adjust the new_placement matrix to ensure elements (including duplicates) that exist in both  
-    old_placement and new_placement remain in their original positions from old_placement.  
-    New elements (unique to new_placement) will fill the remaining empty positions. 
+    Adjust the new_placement matrix to ensure elements (including duplicates)
+    that exist in both old_placement and new_placement remain in their original
+    positions from old_placement. New elements (unique to new_placement) will
+    fill the remaining empty positions. 
 
     Parameters: 
-        old_placement: Old deployment matrix with shape (num_ranks, num_experts) 
-        new_placement: New deployment matrix to be fixed, must have the same shape as old_placement 
+        old_placement: Old deployment matrix with shape
+            (num_ranks, num_experts) 
+        new_placement: New deployment matrix to be fixed, must have the same
+            shape as old_placement 
     Returns: 
         fixed_new: adjusted version of the new_placement matrix 
     """ 
@@ -408,34 +421,40 @@ class FlashLB(EplbPolicy):
             stage_par[i] = stage_load.max() / stage_load.mean() 
         return stage_par.mean() 
 
-    def group_based_adaptive_searching(self, X, P, M, stage_weights=None, recorsive=False): 
-        n_stage, N = X.shape 
-        if stage_weights is None: 
-            stage_weights = np.ones(n_stage, dtype=np.float32) 
-        if recorsive: 
-            simulated_deployment, simulated_pieces = self.group_based_adaptive_searching(X, P, M, stage_weights, 
-                                                                                        recorsive=False) 
-        else: 
-            simulated_pieces = compute_piece_counts(X, P, stage_weights) 
-            simulated_deployment = lpt_placement(X, simulated_pieces, M, stage_weights) 
-        if M < 2: 
-            return simulated_deployment, simulated_pieces 
-        pieces = group_based_adaptive_searching_kernel( 
-            X.astype(np.float32), 
-            P, 
-            M, 
-            simulated_pieces.astype(np.int32), 
-            simulated_deployment.astype(np.int32), 
-            stage_weights.astype(np.float32), 
+    def group_based_adaptive_searching(self, X, P, M, stage_weights=None,
+                                       recorsive=False):
+        n_stage, N = X.shape
+        if stage_weights is None:
+            stage_weights = np.ones(n_stage, dtype=np.float32)
+        if recorsive:
+            simulated_deployment, simulated_pieces = (
+                self.group_based_adaptive_searching(
+                    X, P, M, stage_weights, recorsive=False
+                )
+            )
+        else:
+            simulated_pieces = compute_piece_counts(X, P, stage_weights)
+            simulated_deployment = lpt_placement(
+                X, simulated_pieces, M, stage_weights
+            )
+        if M < 2:
+            return simulated_deployment, simulated_pieces
+        pieces = group_based_adaptive_searching_kernel(
+            X.astype(np.float32),
+            P,
+            M,
+            simulated_pieces.astype(np.int32),
+            simulated_deployment.astype(np.int32),
+            stage_weights.astype(np.float32),
         )
-        deployment = lpt_placement(X, pieces, M, stage_weights) 
-        X_all = X.sum(0) 
-        unit_load = X_all / pieces 
-        load = unit_load[deployment].sum(-1) 
-        sim_unit_load = X_all / simulated_pieces 
-        sim_load = sim_unit_load[simulated_deployment].sum(-1) 
-        if load.max() > sim_load.max(): 
-            return simulated_deployment, simulated_pieces 
+        deployment = lpt_placement(X, pieces, M, stage_weights)
+        X_all = X.sum(0)
+        unit_load = X_all / pieces
+        load = unit_load[deployment].sum(-1)
+        sim_unit_load = X_all / simulated_pieces
+        sim_load = sim_unit_load[simulated_deployment].sum(-1)
+        if load.max() > sim_load.max():
+            return simulated_deployment, simulated_pieces
         return deployment, pieces 
 
     def need_update(self, current_par, layer_id=0): 
@@ -450,22 +469,26 @@ class FlashLB(EplbPolicy):
         stage_weights = stage_weights / stage_weights.max() 
         return stage_weights 
 
-    def rebalance_layer(self, num_replicas, num_rank, deployment, hotness, layer_id=0): 
-        current_par = self.compute_rank_load(deployment, hotness) 
-        if not self.need_update(current_par, layer_id): 
-            pieces=np.bincount(deployment.ravel()) 
-            return deployment, pieces, current_par, current_par 
-
-        stage_weights = self.compute_stage_weight(hotness) 
-        new_deployment, pieces = self.group_based_adaptive_searching( 
-            hotness, 
-            num_replicas, 
-            num_rank, 
-            stage_weights, 
-            recorsive=False) 
-        assert not np.any(new_deployment < 0), \
-            f"Deployment contains {np.sum(new_deployment < 0)} negative values (invalid empty places)" 
-        new_par = self.compute_rank_load(new_deployment, hotness) 
+    def rebalance_layer(self, num_replicas, num_rank, deployment, hotness,
+                        layer_id=0):
+        current_par = self.compute_rank_load(deployment, hotness)
+        if not self.need_update(current_par, layer_id):
+            pieces = np.bincount(deployment.ravel())
+            return deployment, pieces, current_par, current_par
+    
+        stage_weights = self.compute_stage_weight(hotness)
+        new_deployment, pieces = self.group_based_adaptive_searching(
+            hotness,
+            num_replicas,
+            num_rank,
+            stage_weights,
+            recorsive=False
+        )
+        assert not np.any(new_deployment < 0), (
+            f"Deployment contains {np.sum(new_deployment < 0)} negative "
+            "values (invalid empty places)"
+        )
+        new_par = self.compute_rank_load(new_deployment, hotness)
         return new_deployment, pieces, new_par, current_par 
 
     def register_hotness(self, num_layer, hotness): 
@@ -483,102 +506,139 @@ class FlashLB(EplbPolicy):
         np.add.at(counts, idx, 1) 
         return result / counts 
     
-    def rebalance_experts(self, weight, num_replicas, num_groups, num_nodes, num_ranks, old_global_expert_indices=None): 
-        """ 
-        Entry point for expert-parallelism load balancer. 
-        Parameters: 
-            old_global_expert_indices: [num_moe_layers, num_physical_experts], 
-            mapping from physical experts to logical experts. 
-            weight: [layers, num_logical_experts],the load statistics 
-            for all logical experts 
-            num_replicas: number of physical experts, must be a multiple of 
-                `num_ranks` 
-            num_groups: number of expert groups 
-            num_nodes: number of server nodes 
-            num_ranks: number of ranks, must be a multiple of `num_nodes` 
-        Returns: 
-            physical_to_logical_map: [layers, num_replicas], the expert 
-             index of each replica 
-            logical_to_physical_map: [layers, num_logical_experts, X], 
-             the replica indices for each expert 
-            expert_count: [layers, num_logical_experts], number of 
-            physical replicas for each logical expert 
-        """ 
-        assert num_ranks % num_nodes == 0 
-        assert num_replicas % num_ranks == 0 
-
-        expert_workload = weight.cpu().numpy() 
-        expert_workload +=1 
-        num_layer,num_expert = expert_workload.shape 
-        if old_global_expert_indices != None: 
-            current_deployment = old_global_expert_indices.cpu().numpy() 
-            new_deployment = current_deployment.copy() 
-        else: 
-            new_deployment = np.zeros((num_layer,num_ranks,num_replicas//num_ranks)) 
-
-        self.register_hotness(num_layer, expert_workload) 
-        layers_need_update = np.arange(num_layer) 
-        new_par = np.zeros(layers_need_update.shape[0]) 
-        current_par = np.zeros(layers_need_update.shape[0]) 
-        expert_count = np.zeros((num_layer,num_expert)) 
-
-        for i, layer in enumerate(layers_need_update): 
-            hotness = np.array(self.hotness_window[layer]) 
-            if hotness.shape[0] > self.max_stage_window: 
-                hotness = self.compress_by_avg_pooling_fast_nd(hotness, self.max_stage_window) 
-            if old_global_expert_indices == None: 
-                stage_weights = self.compute_stage_weight(hotness) 
-                new_deployment[layer], expert_count[layer] = self.group_based_adaptive_searching( 
-                    hotness, 
-                    num_replicas, 
-                    num_ranks, 
-                    stage_weights, 
-                    recorsive=False 
-                ) 
-            else: 
-                new_deployment[layer], expert_count[layer], new_par[i], current_par[i] = self.rebalance_layer( 
-                    num_replicas, 
-                    num_ranks, 
-                    current_deployment[layer], 
-                    hotness, 
-                    layer_id=layer 
+    def rebalance_experts(self, weight, num_replicas, num_groups, num_nodes,
+                          num_ranks, old_global_expert_indices=None):
+        """
+        Entry point for expert-parallelism load balancer.
+        Parameters:
+            old_global_expert_indices: [num_moe_layers, num_physical_experts],
+                mapping from physical experts to logical experts.
+            weight: [layers, num_logical_experts], the load statistics
+                for all logical experts
+            num_replicas: number of physical experts, must be a multiple of
+                `num_ranks`
+            num_groups: number of expert groups
+            num_nodes: number of server nodes
+            num_ranks: number of ranks, must be a multiple of `num_nodes`
+        Returns:
+            physical_to_logical_map: [layers, num_replicas], the expert
+                index of each replica
+            logical_to_physical_map: [layers, num_logical_experts, X],
+                the replica indices for each expert
+            expert_count: [layers, num_logical_experts], number of
+                physical replicas for each logical expert
+        """
+        assert num_ranks % num_nodes == 0
+        assert num_replicas % num_ranks == 0
+    
+        expert_workload = weight.cpu().numpy()
+        expert_workload += 1
+        num_layer, num_expert = expert_workload.shape
+        if old_global_expert_indices is not None:
+            current_deployment = old_global_expert_indices.cpu().numpy()
+            new_deployment = current_deployment.copy()
+        else:
+            new_deployment = np.zeros(
+                (num_layer, num_ranks, num_replicas // num_ranks)
+            )
+    
+        self.register_hotness(num_layer, expert_workload)
+        layers_need_update = np.arange(num_layer)
+        new_par = np.zeros(layers_need_update.shape[0])
+        current_par = np.zeros(layers_need_update.shape[0])
+        expert_count = np.zeros((num_layer, num_expert))
+    
+        for i, layer in enumerate(layers_need_update):
+            hotness = np.array(self.hotness_window[layer])
+            if hotness.shape[0] > self.max_stage_window:
+                hotness = self.compress_by_avg_pooling_fast_nd(
+                    hotness, self.max_stage_window
                 )
-                
-        priority = new_par / current_par 
-        priority_idx = np.argsort(priority) 
-        priority_idx = priority_idx[priority[priority_idx] < 1][:self.buffer_expert_layer_num] 
-        logger.info(f"FlashLB, new par:{new_par.mean()}, current_par:{current_par.mean()}") 
-
+            if old_global_expert_indices is None:
+                stage_weights = self.compute_stage_weight(hotness)
+                new_deployment[layer], expert_count[layer] = (
+                    self.group_based_adaptive_searching(
+                        hotness,
+                        num_replicas,
+                        num_ranks,
+                        stage_weights,
+                        recorsive=False
+                    )
+                )
+            else:
+                (new_deployment[layer], expert_count[layer], new_par[i],
+                 current_par[i]) = self.rebalance_layer(
+                    num_replicas,
+                    num_ranks,
+                    current_deployment[layer],
+                    hotness,
+                    layer_id=layer
+                )
+    
+        priority = new_par / current_par
+        priority_idx = np.argsort(priority)
+        priority_idx = priority_idx[priority[priority_idx] < 1][
+            :self.buffer_expert_layer_num
+        ]
+        logger.info(
+            "FlashLB, new par:%s, current_par:%s",
+            new_par.mean(), current_par.mean()
+        )
+    
         change = len(priority_idx) > 0
-        if np.all(expert_workload == 1): 
-            for _,layer in enumerate(layers_need_update): 
-                self.hotness_window[layer].pop() 
+        if np.all(expert_workload == 1):
+            for _, layer in enumerate(layers_need_update):
+                self.hotness_window[layer].pop()
             change = False
-        
-        if old_global_expert_indices == None: 
-            physical_to_logical_map = np.array(new_deployment,dtype=int).reshape((num_layer,num_replicas)) 
-            maxlogcnt = int(expert_count.max()) 
-            logical_to_physical_map = \
-                compute_logical_to_physical_map(physical_to_logical_map,num_layer,num_expert,num_replicas,maxlogcnt) 
-            physical_to_logical_map = torch.tensor(physical_to_logical_map,dtype=int,device=weight.device) 
-            logical_to_physical_map = torch.tensor(logical_to_physical_map,dtype=int,device=weight.device) 
-            expert_count = torch.tensor(expert_count,dtype=int,device=weight.device) 
-            return physical_to_logical_map, logical_to_physical_map, expert_count 
-        
-        deployment = current_deployment.copy() 
-         
-        if change: 
-            for idx in priority_idx: 
-                deployment[idx] = auto_fix_new_placement(current_deployment[idx],new_deployment[idx]) 
-                self.par_history[idx] = new_par[idx] 
-        physical_to_logical_map = deployment.reshape((num_layer,num_replicas)) 
-        maxlogcnt = int(expert_count.max()) 
-        logical_to_physical_map = \
-            compute_logical_to_physical_map(physical_to_logical_map,num_layer,num_expert,num_replicas,maxlogcnt) 
-        physical_to_logical_map = torch.tensor(physical_to_logical_map,dtype=int,device=weight.device) 
-        logical_to_physical_map = torch.tensor(logical_to_physical_map,dtype=int,device=weight.device) 
-        expert_count = torch.tensor(expert_count,dtype=int,device=weight.device) 
-        return physical_to_logical_map, logical_to_physical_map, expert_count 
+    
+        if old_global_expert_indices is None:
+            physical_to_logical_map = np.array(
+                new_deployment, dtype=int
+            ).reshape((num_layer, num_replicas))
+            maxlogcnt = int(expert_count.max())
+            logical_to_physical_map = compute_logical_to_physical_map(
+                physical_to_logical_map, num_layer, num_expert,
+                num_replicas, maxlogcnt
+            )
+            physical_to_logical_map = torch.tensor(
+                physical_to_logical_map, dtype=int, device=weight.device
+            )
+            logical_to_physical_map = torch.tensor(
+                logical_to_physical_map, dtype=int, device=weight.device
+            )
+            expert_count = torch.tensor(
+                expert_count, dtype=int, device=weight.device
+            )
+            return (physical_to_logical_map, logical_to_physical_map,
+                    expert_count)
+    
+        deployment = current_deployment.copy()
+    
+        if change:
+            for idx in priority_idx:
+                deployment[idx] = auto_fix_new_placement(
+                    current_deployment[idx], new_deployment[idx]
+                )
+                self.par_history[idx] = new_par[idx]
+        physical_to_logical_map = deployment.reshape(
+            (num_layer, num_replicas)
+        )
+        maxlogcnt = int(expert_count.max())
+        logical_to_physical_map = compute_logical_to_physical_map(
+            physical_to_logical_map, num_layer, num_expert,
+            num_replicas, maxlogcnt
+        )
+        physical_to_logical_map = torch.tensor(
+            physical_to_logical_map, dtype=int, device=weight.device
+        )
+        logical_to_physical_map = torch.tensor(
+            logical_to_physical_map, dtype=int, device=weight.device
+        )
+        expert_count = torch.tensor(
+            expert_count, dtype=int, device=weight.device
+        )
+        return (physical_to_logical_map, logical_to_physical_map,
+                expert_count) 
 
 def warmup_flashlb(): 
     algo = FlashLB() 
